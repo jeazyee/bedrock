@@ -67,13 +67,18 @@ Dokploy's **Environment** tab *is* the `.env` file. On every deploy it writes th
 This repo is meant to be deployed as a **Docker Compose** application (not Docker Stack). Leave the compose path as `./docker-compose.yml`.
 
 1. Create a Compose service in Dokploy, type **Docker Compose**, and point it at this repository.
-2. In **Domains**, add your hostname on the `web` service, port `80`. Dokploy/Traefik terminates TLS.
-3. Environment is optional. Database passwords, WordPress salts, and `WP_HOME` are created automatically and stored on the `config` volume. Set `WP_HOME` in Environment only if you want to pin the canonical URL (for example `https://www.example.com`) before the first visit.
-4. Deploy, then open the domain once so WordPress can persist the public URL. Enable **Volume Backups** for `db_data`, `uploads`, and `config` (config holds DB passwords and salts — losing it without `db_data` is recoverable; losing `config` while keeping `db_data` is not).
+2. In **Environment**, set:
 
-Named volumes (`db_data`, `uploads`, `redis_data`, `config`) survive AutoDeploy. Do not enable Isolated Deployments unless you also remove the external `dokploy-network` block.
+```
+WP_HOME=https://your-domain
+```
 
-Optional knobs: `INNODB_BUFFER_POOL_SIZE` (default `512M`), `REDIS_MAXMEMORY` (default `256mb`), `MYSQL_MAX_CONNECTIONS` (default `150`).
+   Database passwords and WordPress salts are generated on first boot and stored on the `config` volume.
+3. In **Domains**, add the same hostname on the `web` service, port `80`.
+4. If a previous deploy failed, delete the compose volumes (`db_data` and `config`) once so MariaDB can initialize cleanly, then deploy again.
+5. Enable **Volume Backups** for `db_data`, `uploads`, and `config`. Do not enable Isolated Deployments unless you also remove the external `dokploy-network` block.
+
+Named volumes (`db_data`, `uploads`, `redis_data`, `config`) survive AutoDeploy.
 
 ## Getting Started
 

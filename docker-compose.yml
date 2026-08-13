@@ -1,6 +1,5 @@
 # Production stack. Dokploy uses this file by default.
-# Dokploy Environment tab writes `.env` — optional. DB password, salts, and site URL
-# are generated/detected and stored on the `config` volume.
+# Environment: set WP_HOME=https://your-domain (required). DB passwords are auto-generated.
 # Local development: docker compose -f docker-compose.dev.yml up -d
 
 x-php: &php
@@ -10,12 +9,13 @@ x-php: &php
     target: php
   image: ${COMPOSE_PROJECT_NAME:-bedrock}-php
   env_file:
-    - path: .env
-      required: false
+    - .env
   environment:
     DB_HOST: database
     DB_NAME: ${DB_NAME:-wordpress}
     DB_USER: ${DB_USER:-wordpress}
+    WP_HOME: ${WP_HOME:-}
+    WP_SITEURL: ${WP_SITEURL:-}
     WP_REDIS_HOST: redis
     WP_ENV: ${WP_ENV:-production}
     DISABLE_WP_CRON: "true"
@@ -41,41 +41,24 @@ x-php: &php
 services:
   secrets-init:
     image: busybox:1.37
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      DB_PASSWORD: ${DB_PASSWORD:-}
-      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
     volumes:
       - config:/config
     command:
-      - /bin/sh
+      - sh
       - -c
       - |
-        set -eu
         mkdir -p /config
-        gen() { dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'; }
         if [ ! -s /config/db_password ]; then
-          if [ -n "$${DB_PASSWORD:-}" ]; then
-            printf '%s' "$$DB_PASSWORD" > /config/db_password
-          else
-            echo "Generating MariaDB user password..."
-            gen > /config/db_password
-          fi
+          tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/u
+          head -c 32 /tmp/u > /config/db_password
         fi
         if [ ! -s /config/db_root_password ]; then
-          if [ -n "$${DB_ROOT_PASSWORD:-}" ]; then
-            printf '%s' "$$DB_ROOT_PASSWORD" > /config/db_root_password
-          else
-            echo "Generating MariaDB root password..."
-            gen > /config/db_root_password
-          fi
+          tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/r
+          head -c 32 /tmp/r > /config/db_root_password
         fi
         chmod 644 /config/db_password /config/db_root_password
-    restart: "no"
-    security_opt:
-      - no-new-privileges:true
+        echo "Database secrets are ready"
+    restart: on-failure
 
   php:
     <<: *php
@@ -84,7 +67,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 40s
 
   web:
     build:
@@ -106,7 +89,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -141,28 +124,36 @@ services:
       - db_data:/var/lib/mysql
       - config:/run/mariadb-secrets:ro
     depends_on:
-      secrets-init:
-        condition: service_completed_successfully
+      - secrets-init
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        echo "Waiting for database secrets..."
+        i=0
+        while [ $$i -lt 90 ]; do
+          if [ -s /run/mariadb-secrets/db_password ] && [ -s /run/mariadb-secrets/db_root_password ]; then
+            exec docker-entrypoint.sh "$$@"
+          fi
+          i=$$((i + 1))
+          sleep 1
+        done
+        echo "Timed out waiting for DB secrets" >&2
+        exit 1
+      - --
     command:
+      - mariadbd
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --innodb-buffer-pool-size=${INNODB_BUFFER_POOL_SIZE:-512M}
-      - --innodb-redo-log-capacity=268435456
-      - --innodb-flush-method=O_DIRECT
+      - --innodb-buffer-pool-size=256M
       - --innodb-file-per-table=1
-      - --innodb-flush-log-at-trx-commit=2
-      - --max-connections=${MYSQL_MAX_CONNECTIONS:-150}
       - --skip-name-resolve
-      - --tmp-table-size=64M
-      - --max-heap-table-size=64M
-      - --table-open-cache=800
-      - --thread-cache-size=16
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
-      timeout: 20s
-      retries: 10
-      start_period: 30s
+      timeout: 5s
+      retries: 24
+      start_period: 90s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -173,14 +164,12 @@ services:
     command:
       - redis-server
       - --maxmemory
-      - ${REDIS_MAXMEMORY:-256mb}
+      - 256mb
       - --maxmemory-policy
       - allkeys-lru
       - --save
       - "60"
       - "1000"
-      - --tcp-backlog
-      - "511"
     volumes:
       - redis_data:/data
     healthcheck:

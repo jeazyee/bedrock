@@ -17,6 +17,18 @@ if [ "$(id -u)" = "0" ]; then
   chmod 775 "$CONFIG_DIR"
 fi
 
+i=0
+while [ ! -s "$CONFIG_DIR/db_password" ]; do
+  i=$((i + 1))
+  if [ "$i" -gt 90 ]; then
+    echo "Timed out waiting for DB password file" >&2
+    exit 1
+  fi
+  sleep 1
+done
+DB_PASSWORD="$(cat "$CONFIG_DIR/db_password")"
+export DB_PASSWORD
+
 is_placeholder() {
   [ -z "${1:-}" ] || [ "$1" = "generateme" ]
 }
@@ -52,11 +64,6 @@ EOF
   fi
   export AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY
   export AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT
-fi
-
-if [ -s "$CONFIG_DIR/db_password" ]; then
-  DB_PASSWORD="$(cat "$CONFIG_DIR/db_password")"
-  export DB_PASSWORD
 fi
 
 if [ -n "${WP_HOME:-}" ] && [ ! -f "$CONFIG_DIR/wp_home" ]; then
