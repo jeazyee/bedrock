@@ -4,6 +4,8 @@ set -eu
 UPLOADS="${BEDROCK_UPLOADS_DIR:-/var/www/html/web/app/uploads}"
 CONFIG_DIR="${BEDROCK_CONFIG_DIR:-/var/www/html/.config}"
 SALTS_FILE="${CONFIG_DIR}/salts.env"
+DOTENV_SRC="${BEDROCK_DOTENV_FILE:-/run/dotenv}"
+DOTENV_DEST="/var/www/html/.env"
 
 mkdir -p "$UPLOADS" "$CONFIG_DIR"
 
@@ -17,21 +19,44 @@ if [ "$(id -u)" = "0" ]; then
   chmod 775 "$CONFIG_DIR"
 fi
 
-i=0
-while [ ! -s "$CONFIG_DIR/db_password" ]; do
-  i=$((i + 1))
-  if [ "$i" -gt 90 ]; then
-    echo "Timed out waiting for DB password file" >&2
-    exit 1
+# Dokploy / Compose write .env next to docker-compose.yml. Copy it in so
+# Bedrock's phpdotenv loader (and ${WP_HOME} interpolation) works as upstream.
+if [ -f "$DOTENV_SRC" ]; then
+  cp "$DOTENV_SRC" "$DOTENV_DEST"
+  if [ "$(id -u)" = "0" ]; then
+    chown www-data:www-data "$DOTENV_DEST"
+    chmod 640 "$DOTENV_DEST"
   fi
-  sleep 1
-done
-DB_PASSWORD="$(cat "$CONFIG_DIR/db_password")"
-export DB_PASSWORD
+fi
 
 is_placeholder() {
   [ -z "${1:-}" ] || [ "$1" = "generateme" ]
 }
+
+if is_placeholder "${DB_PASSWORD:-}"; then
+  i=0
+  while [ ! -s "$CONFIG_DIR/db_password" ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 90 ]; then
+      echo "Timed out waiting for DB password file" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  DB_PASSWORD="$(cat "$CONFIG_DIR/db_password")"
+  export DB_PASSWORD
+fi
+
+export DB_NAME="${DB_NAME:-wordpress}"
+export DB_USER="${DB_USER:-wordpress}"
+
+if [ -n "${WP_HOME:-}" ]; then
+  case "${WP_SITEURL:-}" in
+    ''|*'${WP_HOME}'*)
+      export WP_SITEURL="${WP_HOME}/wp"
+      ;;
+  esac
+fi
 
 if is_placeholder "${AUTH_KEY:-}"; then
   if [ -f "$SALTS_FILE" ]; then
@@ -64,10 +89,6 @@ EOF
   fi
   export AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY
   export AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT
-fi
-
-if [ -n "${WP_HOME:-}" ] && [ ! -f "$CONFIG_DIR/wp_home" ]; then
-  printf '%s' "$WP_HOME" > "$CONFIG_DIR/wp_home"
 fi
 
 if [ "${COMPOSER_AUTO_INSTALL:-0}" = "1" ] && [ ! -f /var/www/html/vendor/autoload.php ]; then

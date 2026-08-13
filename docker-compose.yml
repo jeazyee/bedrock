@@ -1,5 +1,6 @@
 # Production stack. Dokploy uses this file by default.
-# Environment: set WP_HOME=https://your-domain (required). DB passwords are auto-generated.
+# Environment: paste a Bedrock .env (see .env.example). WP_HOME is required.
+# If DB_PASSWORD / salts are omitted, they are generated on first boot.
 # Local development: docker compose -f docker-compose.dev.yml up -d
 
 x-php: &php
@@ -12,18 +13,15 @@ x-php: &php
     - .env
   environment:
     DB_HOST: database
-    DB_NAME: ${DB_NAME:-wordpress}
-    DB_USER: ${DB_USER:-wordpress}
     WP_HOME: ${WP_HOME:-}
-    WP_SITEURL: ${WP_SITEURL:-}
-    WP_REDIS_HOST: redis
     WP_ENV: ${WP_ENV:-production}
+    WP_REDIS_HOST: redis
     DISABLE_WP_CRON: "true"
-    WP_POST_REVISIONS: ${WP_POST_REVISIONS:-10}
     WP_CLI_ALLOW_ROOT: "1"
   volumes:
     - uploads:/var/www/html/web/app/uploads
     - config:/var/www/html/.config
+    - .env:/run/dotenv:ro
   depends_on:
     database:
       condition: service_healthy
@@ -41,6 +39,9 @@ x-php: &php
 services:
   secrets-init:
     image: busybox:1.37
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
     volumes:
       - config:/config
     command:
@@ -49,12 +50,22 @@ services:
       - |
         mkdir -p /config
         if [ ! -s /config/db_password ]; then
-          tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/u
-          head -c 32 /tmp/u > /config/db_password
+          if [ -n "$$DB_PASSWORD" ]; then
+            printf '%s' "$$DB_PASSWORD" > /config/db_password
+          else
+            tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/u
+            head -c 32 /tmp/u > /config/db_password
+          fi
         fi
         if [ ! -s /config/db_root_password ]; then
-          tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/r
-          head -c 32 /tmp/r > /config/db_root_password
+          if [ -n "$$DB_ROOT_PASSWORD" ]; then
+            printf '%s' "$$DB_ROOT_PASSWORD" > /config/db_root_password
+          elif [ -n "$$DB_PASSWORD" ]; then
+            printf '%s' "$$DB_PASSWORD" > /config/db_root_password
+          else
+            tr -d '-' < /proc/sys/kernel/random/uuid > /tmp/r
+            head -c 32 /tmp/r > /config/db_root_password
+          fi
         fi
         chmod 644 /config/db_password /config/db_root_password
         echo "Database secrets are ready"
@@ -107,7 +118,7 @@ services:
       - sh
       - -c
       - |
-        until [ -s /var/www/html/.config/wp_home ] && wp core is-installed --allow-root >/dev/null 2>&1; do sleep 10; done
+        until wp core is-installed --allow-root >/dev/null 2>&1; do sleep 10; done
         while true; do wp cron event run --due-now --allow-root --quiet || true; sleep 60; done
     healthcheck:
       disable: true

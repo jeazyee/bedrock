@@ -1,5 +1,5 @@
 # Local development. Usage: docker compose -f docker-compose.dev.yml up -d
-# Do not point Dokploy at this file.
+# Uses the Bedrock .env in the project root (phpdotenv). Do not point Dokploy at this file.
 
 name: bedrock
 
@@ -9,8 +9,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: php-dev
-    env_file:
-      - .env
     environment:
       DB_HOST: database
       WP_REDIS_HOST: redis

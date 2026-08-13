@@ -62,23 +62,41 @@ Generate new salts at [https://roots.io/salts.html](https://roots.io/salts.html)
 
 ## Production (Dokploy)
 
-Dokploy's **Environment** tab *is* the `.env` file. On every deploy it writes that file next to `docker-compose.yml` and Compose loads it. You never create or edit `.env` on the server.
+Dokploy's **Environment** tab *is* the Bedrock `.env` file. On every deploy it writes that file next to `docker-compose.yml`. PHP loads it with phpdotenv, the same way Bedrock does locally — including `WP_SITEURL="${WP_HOME}/wp"` interpolation. You never create or edit `.env` on the server.
 
 This repo is meant to be deployed as a **Docker Compose** application (not Docker Stack). Leave the compose path as `./docker-compose.yml`.
 
 1. Create a Compose service in Dokploy, type **Docker Compose**, and point it at this repository.
-2. In **Environment**, set:
+2. In **Environment**, paste a full Bedrock `.env` (copy `.env.example` and replace the values):
 
 ```
-WP_HOME=https://your-domain
+DB_NAME='wordpress'
+DB_USER='wordpress'
+DB_PASSWORD='choose-a-strong-password'
+WP_ENV='production'
+WP_HOME='https://your-domain'
+WP_SITEURL="${WP_HOME}/wp"
+AUTH_KEY='…'
+SECURE_AUTH_KEY='…'
+LOGGED_IN_KEY='…'
+NONCE_KEY='…'
+AUTH_SALT='…'
+SECURE_AUTH_SALT='…'
+LOGGED_IN_SALT='…'
+NONCE_SALT='…'
 ```
 
-   Database passwords and WordPress salts are generated on first boot and stored on the `config` volume.
+   Compose overrides `DB_HOST=database` and `WP_REDIS_HOST=redis`, so existing Bedrock `.env` files that still say `DB_HOST=localhost` keep working.
+
+   **Minimum** (same as before): `WP_HOME=https://your-domain` and `WP_ENV=production`. `DB_PASSWORD` and salts are then generated on first boot and stored on the `config` volume. If the database volume already exists, do not add a *different* `DB_PASSWORD` later — MariaDB only reads it on first initialization.
+
 3. In **Domains**, add the same hostname on the `web` service, port `80`.
 4. If a previous deploy failed, delete the compose volumes (`db_data` and `config`) once so MariaDB can initialize cleanly, then deploy again.
 5. Enable **Volume Backups** for `db_data`, `uploads`, and `config`. Do not enable Isolated Deployments unless you also remove the external `dokploy-network` block.
 
 Named volumes (`db_data`, `uploads`, `redis_data`, `config`) survive AutoDeploy.
+
+To add this stack to another Bedrock project, follow [docs/migrate-existing-bedrock.md](docs/migrate-existing-bedrock.md).
 
 ## Getting Started
 

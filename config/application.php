@@ -53,8 +53,9 @@ if (file_exists($root_dir . '/.env')) {
     $dotenv = Dotenv\Dotenv::create($repository, $root_dir, $env_files, false);
     $dotenv->load();
 
+    $dotenv->required(['WP_HOME', 'WP_SITEURL']);
     if (!env('DATABASE_URL')) {
-        $dotenv->required(['DB_NAME', 'DB_USER']);
+        $dotenv->required(['DB_NAME', 'DB_USER', 'DB_PASSWORD']);
     }
 }
 
@@ -89,44 +90,10 @@ if (!defined('WP_DEVELOPMENT_MODE')) {
 }
 
 /**
- * Allow WordPress to detect HTTPS when used behind a reverse proxy or a load balancer
- * See https://codex.wordpress.org/Function_Reference/is_ssl#Notes
- */
-if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
-    $_SERVER['HTTPS'] = 'on';
-}
-
-/**
  * URLs
- *
- * WP_HOME is taken from the environment, then a persisted value from the first
- * public request (Dokploy/Traefik Host header), then a CLI fallback.
  */
-$config_dir = $root_dir . '/.config';
-$wp_home_file = $config_dir . '/wp_home';
-$wp_home = env('WP_HOME') ?: null;
-
-if (! $wp_home && is_readable($wp_home_file)) {
-    $wp_home = trim((string) file_get_contents($wp_home_file)) ?: null;
-}
-
-if (! $wp_home && ! empty($_SERVER['HTTP_HOST'])) {
-    $https = ! empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-    $wp_home = ($https ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
-
-    if (! is_dir($config_dir)) {
-        @mkdir($config_dir, 0775, true);
-    }
-
-    if (is_dir($config_dir) && ! is_file($wp_home_file)) {
-        @file_put_contents($wp_home_file, $wp_home);
-    }
-}
-
-$wp_home = $wp_home ?: 'http://localhost';
-
-Config::define('WP_HOME', $wp_home);
-Config::define('WP_SITEURL', env('WP_SITEURL') ?: $wp_home . '/wp');
+Config::define('WP_HOME', env('WP_HOME'));
+Config::define('WP_SITEURL', env('WP_SITEURL'));
 
 /**
  * Custom Content Directory
@@ -142,13 +109,9 @@ if (env('DB_SSL')) {
     Config::define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
 }
 
-Config::define('DB_NAME', env('DB_NAME') ?: 'wordpress');
-Config::define('DB_USER', env('DB_USER') ?: 'wordpress');
-$db_password = env('DB_PASSWORD');
-if (! $db_password && is_readable($root_dir . '/.config/db_password')) {
-    $db_password = trim((string) file_get_contents($root_dir . '/.config/db_password')) ?: null;
-}
-Config::define('DB_PASSWORD', $db_password);
+Config::define('DB_NAME', env('DB_NAME'));
+Config::define('DB_USER', env('DB_USER'));
+Config::define('DB_PASSWORD', env('DB_PASSWORD'));
 Config::define('DB_HOST', env('DB_HOST') ?: 'localhost');
 Config::define('DB_CHARSET', 'utf8mb4');
 Config::define('DB_COLLATE', '');
@@ -219,6 +182,14 @@ Config::define('WP_DEBUG_DISPLAY', false);
 Config::define('WP_DEBUG_LOG', false);
 Config::define('SCRIPT_DEBUG', false);
 ini_set('display_errors', '0');
+
+/**
+ * Allow WordPress to detect HTTPS when used behind a reverse proxy or a load balancer
+ * See https://codex.wordpress.org/Function_Reference/is_ssl#Notes
+ */
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
 
 $env_config = __DIR__ . '/environments/' . WP_ENV . '.php';
 
