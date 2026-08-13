@@ -18,6 +18,7 @@ x-php: &php
     WP_REDIS_HOST: redis
     DISABLE_WP_CRON: "true"
     WP_CLI_ALLOW_ROOT: "1"
+    BEDROCK_CHOWN_UPLOADS: "1"
   volumes:
     - uploads:/var/www/html/web/app/uploads
     - config:/var/www/html/.config
@@ -118,8 +119,8 @@ services:
       - sh
       - -c
       - |
-        until wp core is-installed --allow-root >/dev/null 2>&1; do sleep 10; done
-        while true; do wp cron event run --due-now --allow-root --quiet || true; sleep 60; done
+        until runuser -u www-data -- wp core is-installed >/dev/null 2>&1; do sleep 10; done
+        while true; do runuser -u www-data -- wp cron event run --due-now --quiet || true; sleep 60; done
     healthcheck:
       disable: true
 

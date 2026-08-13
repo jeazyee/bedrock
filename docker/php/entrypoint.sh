@@ -10,10 +10,18 @@ DOTENV_DEST="/var/www/html/.env"
 mkdir -p "$UPLOADS" "$CONFIG_DIR"
 
 if [ "$(id -u)" = "0" ]; then
-  owner="$(stat -c %u "$UPLOADS" 2>/dev/null || echo 0)"
-  if [ "$owner" = "0" ]; then
-    chown www-data:www-data "$UPLOADS"
+  # Named volumes (Dokploy) are often root-owned; WP-CLI as root also creates
+  # year/month dirs as root. Recurse in production so php-fpm (www-data) can write.
+  # Dev bind-mounts keep host ownership unless the mount is already root.
+  if [ "${BEDROCK_CHOWN_UPLOADS:-0}" = "1" ]; then
+    chown -R www-data:www-data "$UPLOADS"
     chmod 775 "$UPLOADS"
+  else
+    owner="$(stat -c %u "$UPLOADS" 2>/dev/null || echo 0)"
+    if [ "$owner" = "0" ]; then
+      chown www-data:www-data "$UPLOADS"
+      chmod 775 "$UPLOADS"
+    fi
   fi
   chown www-data:www-data "$CONFIG_DIR"
   chmod 775 "$CONFIG_DIR"
