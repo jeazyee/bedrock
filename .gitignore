@@ -8,6 +8,7 @@ web/app/upgrade
 web/app/uploads/*
 !web/app/uploads/.gitkeep
 web/app/cache/*
+web/app/object-cache.php
 
 # WordPress
 web/wp
@@ -20,6 +21,7 @@ web/.htaccess
 .env
 .env.*
 !.env.example
+.config/
 
 # Composer
 /vendor
@@ -32,3 +34,6 @@ phpunit.xml
 
 # WP-CLI
 wp-cli.local.yml
+
+# Local Compose overrides (never used on Dokploy)
+docker-compose.override.yml

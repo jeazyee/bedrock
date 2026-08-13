@@ -1,0 +1,203 @@
+# Production stack. Dokploy uses this file by default.
+# Dokploy Environment tab writes `.env` — optional. DB password, salts, and site URL
+# are generated/detected and stored on the `config` volume.
+# Local development: docker compose -f docker-compose.dev.yml up -d
+
+x-php: &php
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: php
+  image: ${COMPOSE_PROJECT_NAME:-bedrock}-php
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DB_HOST: database
+    DB_NAME: ${DB_NAME:-wordpress}
+    DB_USER: ${DB_USER:-wordpress}
+    WP_REDIS_HOST: redis
+    WP_ENV: ${WP_ENV:-production}
+    DISABLE_WP_CRON: "true"
+    WP_POST_REVISIONS: ${WP_POST_REVISIONS:-10}
+    WP_CLI_ALLOW_ROOT: "1"
+  volumes:
+    - uploads:/var/www/html/web/app/uploads
+    - config:/var/www/html/.config
+  depends_on:
+    database:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  init: true
+  ulimits:
+    nofile:
+      soft: 65535
+      hard: 65535
+
+services:
+  secrets-init:
+    image: busybox:1.37
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
+    volumes:
+      - config:/config
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /config
+        gen() { dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'; }
+        if [ ! -s /config/db_password ]; then
+          if [ -n "$${DB_PASSWORD:-}" ]; then
+            printf '%s' "$$DB_PASSWORD" > /config/db_password
+          else
+            echo "Generating MariaDB user password..."
+            gen > /config/db_password
+          fi
+        fi
+        if [ ! -s /config/db_root_password ]; then
+          if [ -n "$${DB_ROOT_PASSWORD:-}" ]; then
+            printf '%s' "$$DB_ROOT_PASSWORD" > /config/db_root_password
+          else
+            echo "Generating MariaDB root password..."
+            gen > /config/db_root_password
+          fi
+        fi
+        chmod 644 /config/db_password /config/db_root_password
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  php:
+    <<: *php
+    healthcheck:
+      test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: nginx
+    image: ${COMPOSE_PROJECT_NAME:-bedrock}-nginx
+    ports:
+      - "80"
+    volumes:
+      - uploads:/var/www/html/web/app/uploads:ro
+    tmpfs:
+      - /var/cache/nginx/fastcgi:size=512m,mode=1777
+    depends_on:
+      php:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    networks:
+      - default
+      - dokploy-network
+
+  cron:
+    <<: *php
+    command:
+      - sh
+      - -c
+      - |
+        until [ -s /var/www/html/.config/wp_home ] && wp core is-installed --allow-root >/dev/null 2>&1; do sleep 10; done
+        while true; do wp cron event run --due-now --allow-root --quiet || true; sleep 60; done
+    healthcheck:
+      disable: true
+
+  database:
+    image: mariadb:11.8
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-wordpress}
+      MYSQL_USER: ${DB_USER:-wordpress}
+      MYSQL_PASSWORD_FILE: /run/mariadb-secrets/db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/mariadb-secrets/db_root_password
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - db_data:/var/lib/mysql
+      - config:/run/mariadb-secrets:ro
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=${INNODB_BUFFER_POOL_SIZE:-512M}
+      - --innodb-redo-log-capacity=268435456
+      - --innodb-flush-method=O_DIRECT
+      - --innodb-file-per-table=1
+      - --innodb-flush-log-at-trx-commit=2
+      - --max-connections=${MYSQL_MAX_CONNECTIONS:-150}
+      - --skip-name-resolve
+      - --tmp-table-size=64M
+      - --max-heap-table-size=64M
+      - --table-open-cache=800
+      - --thread-cache-size=16
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 20s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    command:
+      - redis-server
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "60"
+      - "1000"
+      - --tcp-backlog
+      - "511"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  db_data:
+  uploads:
+  redis_data:
+  config:
+
+networks:
+  dokploy-network:
+    external: true

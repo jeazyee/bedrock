@@ -39,6 +39,42 @@ Bedrock is a WordPress boilerplate for developers that want to manage their proj
 - Environment variables with [Dotenv](https://github.com/vlucas/phpdotenv)
 - Autoloader for mu-plugins (use regular plugins as mu-plugins)
 
+## Local development
+
+```sh
+cp .env.example .env
+docker compose -f docker-compose.dev.yml up -d
+```
+
+The first start builds PHP-FPM with the WordPress extensions, installs Composer dependencies, and serves the site at [http://localhost:8080](http://localhost:8080). MariaDB and Redis persist in Docker volumes across `docker compose down` / `up`. Uploads are stored in `web/app/uploads`. Use `docker compose down -v` only when you intend to wipe database and cache data.
+
+```sh
+docker compose -f docker-compose.dev.yml exec php wp core install \
+  --url=http://localhost:8080 \
+  --title=Bedrock \
+  --admin_user=admin \
+  --admin_password=admin \
+  --admin_email=admin@example.com \
+  --skip-email
+```
+
+Generate new salts at [https://roots.io/salts.html](https://roots.io/salts.html) before anything public-facing, or leave `AUTH_KEY=generateme` and let the container generate persistent salts into `.config/`.
+
+## Production (Dokploy)
+
+Dokploy's **Environment** tab *is* the `.env` file. On every deploy it writes that file next to `docker-compose.yml` and Compose loads it. You never create or edit `.env` on the server.
+
+This repo is meant to be deployed as a **Docker Compose** application (not Docker Stack). Leave the compose path as `./docker-compose.yml`.
+
+1. Create a Compose service in Dokploy, type **Docker Compose**, and point it at this repository.
+2. In **Domains**, add your hostname on the `web` service, port `80`. Dokploy/Traefik terminates TLS.
+3. Environment is optional. Database passwords, WordPress salts, and `WP_HOME` are created automatically and stored on the `config` volume. Set `WP_HOME` in Environment only if you want to pin the canonical URL (for example `https://www.example.com`) before the first visit.
+4. Deploy, then open the domain once so WordPress can persist the public URL. Enable **Volume Backups** for `db_data`, `uploads`, and `config` (config holds DB passwords and salts — losing it without `db_data` is recoverable; losing `config` while keeping `db_data` is not).
+
+Named volumes (`db_data`, `uploads`, `redis_data`, `config`) survive AutoDeploy. Do not enable Isolated Deployments unless you also remove the external `dokploy-network` block.
+
+Optional knobs: `INNODB_BUFFER_POOL_SIZE` (default `512M`), `REDIS_MAXMEMORY` (default `256mb`), `MYSQL_MAX_CONNECTIONS` (default `150`).
+
 ## Getting Started
 
 See the [Bedrock installation documentation](https://roots.io/bedrock/docs/installation/).

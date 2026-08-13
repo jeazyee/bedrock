@@ -39,6 +39,7 @@
     "roots/wordpress": "7.0.4",
     "roots/wp-config": "^1.0",
     "vlucas/phpdotenv": "^5.0",
+    "wp-plugin/redis-cache": "^2.8",
     "wp-theme/twentytwentyfive": "^1.0"
   },
   "require-dev": {
@@ -74,6 +75,9 @@
   "scripts": {
     "lint": "pint --test",
     "lint:fix": "pint",
-    "test": "pest"
+    "test": "pest",
+    "enable-redis-cache": "@php docker/php/enable-redis-cache.php",
+    "post-install-cmd": ["@enable-redis-cache"],
+    "post-update-cmd": ["@enable-redis-cache"]
   }
 }

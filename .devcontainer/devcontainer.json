@@ -1,11 +1,12 @@
 {
   "name": "Bedrock Development",
-  "dockerComposeFile": ["docker-compose.yml"],
-  "service": "app",
-  "workspaceFolder": "/roots/app",
+  "dockerComposeFile": ["../docker-compose.dev.yml"],
+  "service": "php",
+  "workspaceFolder": "/var/www/html",
   "forwardPorts": [8080],
   "remoteEnv": {
     "WP_ENV": "development"
   },
-  "postCreateCommand": "cp -n /roots/app/.devcontainer/.env.example /roots/app/.env"
+  "initializeCommand": "test -f .env || cp .env.example .env",
+  "postCreateCommand": "composer install --no-interaction --prefer-dist --optimize-autoloader"
 }
